@@ -24,6 +24,8 @@ bool check = true;
 Adafruit_BNO055 bno = Adafruit_BNO055();
 bool sdInitSuccess = false; //card init status
 File myFile;
+const int pinReed = 2;
+int counter = 0;
 
 /**************************************************************************/
 /*
@@ -47,6 +49,7 @@ void setup(void)
   bno.setExtCrystalUse(true);
 
   Serial.println("Calibration status values: 0=uncalibrated, 3=fully calibrated");
+  attachInterrupt(digitalPinToInterrupt(pinReed),ReedSwitch,RISING);
 }
 
 /**************************************************************************/
@@ -59,10 +62,8 @@ void loop(void)
 {
 
 
- if (sdInitSuccess) { //check if card is initialized already
-        Serial.println("Already initialized.\n");
-      }
-      else if (!sdInitSuccess) { //if not already initialized
+
+      if (!sdInitSuccess) { //if not already initialized
         Serial.println("Initializing SD Card..");
         if (!SD.begin(10)) { //using pin 10 (SS)
           Serial.println("Initialization failed!\n");
@@ -90,10 +91,13 @@ void loop(void)
   /* Display the floating point data */
   uint8_t system, gyro, accel, mag = 0;
   bno.getCalibration(&system, &gyro, &accel, &mag);
-
+if(mag != 3){
+  Serial.println(mag);
+ }
+ 
 
   if(mag == 3){
-    /* if(1 Meter)*/
+     if(counter == 3){
       position_z = position_z + sin((euler.y()*DEG_TO_RAD));
       hyp =  cos((euler.y()*DEG_TO_RAD));    
       
@@ -171,10 +175,15 @@ void loop(void)
         Serial.println("SD Card not initialized.");
         Serial.println("Type \"i\" to initialize.\n");
       }
-
-    delay(10000);
+        counter = 0;
+     }
   }
  
 
   delay(BNO055_SAMPLERATE_DELAY_MS);
 }
+
+void ReedSwitch(){
+      counter = counter + 1;
+      Serial.println(counter);
+    }
