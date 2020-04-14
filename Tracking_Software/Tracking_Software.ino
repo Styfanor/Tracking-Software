@@ -1,3 +1,6 @@
+#include <SoftwareSerial.h>
+#include <LiquidCrystal_I2C.h>
+#include <TinyGPS++.h>
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
@@ -5,14 +8,13 @@
 #include <SPI.h>
 #include <SD.h>
 
-/* This driver reads raw data from the BNO055
+/*
 
    History
    =======
    2020/MAR/06  - First release (Stefan Helm)
 */
 
-/* Set the delay between fresh samples */
 #define BNO055_SAMPLERATE_DELAY_MS (100)
 #define DEG_TO_RAD 0.017453292519943295769236907684886
 double position_x = 0;
@@ -20,13 +22,27 @@ double position_y = 0;
 double position_z = 0;
 double hyp;
 double winkel;
-bool check = true;
+bool Filecheck = true;
+bool gpscheck = true;
+bool soundcheck = true;
 Adafruit_BNO055 bno = Adafruit_BNO055();
+LiquidCrystal_I2C lcd(0x27, 20, 4);
 bool sdInitSuccess = false; //card init status
 File myFile;
-const int pinReed = 2;
+const int pinReed = 3;
+const int pinTon = 9;
+const int pinTaster = 2;
 int counter = 0;
+volatile unsigned long alteZeit=0, entprellZeit=20;
 
+static const int RXPin = 4, TXPin = 5;
+static const uint32_t GPSBaud = 4800;
+
+// The TinyGPS++ object
+TinyGPSPlus gps;
+
+// The serial connection to the GPS device
+SoftwareSerial ss(RXPin, TXPin);
 /**************************************************************************/
 /*
     Arduino setup function (automatically called at startup)
@@ -35,6 +51,11 @@ int counter = 0;
 void setup(void)
 {
   Serial.begin(9600);
+  ss.begin(GPSBaud);
+  pinMode(pinReed, INPUT);
+  pinMode(pinTaster, INPUT);
+  pinMode(pinTon, OUTPUT);
+  digitalWrite(pinTaster, HIGH);
 
   /* Initialise the sensor */
   if(!bno.begin())
@@ -49,7 +70,17 @@ void setup(void)
   bno.setExtCrystalUse(true);
 
   Serial.println("Calibration status values: 0=uncalibrated, 3=fully calibrated");
-  attachInterrupt(digitalPinToInterrupt(pinReed),ReedSwitch,RISING);
+  attachInterrupt(digitalPinToInterrupt(pinReed),ReedSwitch,HIGH);
+  attachInterrupt(digitalPinToInterrupt(pinTaster),INTTaster,LOW);
+
+    // initialize the LCD
+  lcd.begin();
+  // Turn on the blacklight and print a message.
+  lcd.backlight();
+  lcd.clear();
+  lcd.setCursor (0,0);
+  lcd.print("Waiting...");
+
 }
 
 /**************************************************************************/
@@ -97,6 +128,20 @@ if(mag != 3){
  
 
   if(mag == 3){
+    if(soundcheck){
+      digitalWrite(pinTon, HIGH);
+      delay(250);
+      digitalWrite(pinTon, LOW);
+      delay(250);
+      digitalWrite(pinTon, HIGH);
+      delay(250);
+      digitalWrite(pinTon, LOW);
+      delay(250);
+      digitalWrite(pinTon, HIGH);
+      delay(250);
+      digitalWrite(pinTon, LOW);
+      soundcheck = false;
+    }
      if(counter == 3){
       position_z = position_z + sin((euler.y()*DEG_TO_RAD));
       hyp =  cos((euler.y()*DEG_TO_RAD));    
@@ -139,8 +184,27 @@ if(mag != 3){
     Serial.print("3D Winkel: ");
     Serial.println(euler.y());
 
+    lcd.clear();
+    lcd.setCursor (0,0);
+    lcd.print ("Vermessung [m]");
+
+    lcd.setCursor(0,1);
+    lcd.print("X: ");
+    lcd.setCursor(3,1);
+    lcd.print(position_x);
+
+    lcd.setCursor(0,2);
+    lcd.print("Y: ");
+    lcd.setCursor(3,2);
+    lcd.print(position_y);
+
+    lcd.setCursor(0,3);
+    lcd.print("Z: ");
+    lcd.setCursor(3,3);
+    lcd.print(position_z);
+
      if (sdInitSuccess) { //proceed only if card is initialized
-      if(check){
+      if(Filecheck){
         if(SD.exists("Messung.csv")){
         SD.remove("Messung.csv");
         }
@@ -151,7 +215,7 @@ if(mag != 3){
           myFile.print(";");
           myFile.println("z");
           myFile.close(); //this writes to the card
-          check = false;
+          Filecheck = false;
       }
       
         myFile = SD.open("Messung.csv", FILE_WRITE);
@@ -187,3 +251,43 @@ void ReedSwitch(){
       counter = counter + 1;
       Serial.println(counter);
     }
+
+void INTTaster(){
+    if(gpscheck){
+    if((millis() - alteZeit) > entprellZeit) { 
+    if (gps.encode(ss.read())){
+      displayGPSInfo();
+    }
+    alteZeit = millis(); // letzte Schaltzeit merken      
+  }
+}
+}
+
+void displayGPSInfo()
+{
+  
+  if (gps.location.isValid())
+  {
+     if(SD.exists("GPS.csv")){
+        SD.remove("GPS.csv");
+        }
+    myFile = SD.open("GPS.csv", FILE_WRITE);
+        myFile.print("lng");
+          myFile.print(";");
+          myFile.println("lat");
+          myFile.print(gps.location.lng(), 6);
+          myFile.print(";");
+          myFile.print(gps.location.lat(), 6);
+          myFile.close(); //this writes to the card
+          digitalWrite(pinTon,HIGH);
+          delay(100);
+          digitalWrite(pinTon,LOW);
+          gpscheck = false;
+  }
+  else
+  {
+    myFile = SD.open("GPS.csv", FILE_WRITE);
+     myFile.print("INVALID");
+     myFile.close(); //this writes to the card
+}
+}
